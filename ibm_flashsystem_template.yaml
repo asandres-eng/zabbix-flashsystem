@@ -727,7 +727,7 @@ zabbix_export:
         - macro: '{$API_USER}'
           description: 'REST API monitoring user.'
         - macro: '{$API_PASSWORD}'
-          type: SECRET
+          type: SECRET_TEXT
           description: 'REST API password.'
         - macro: '{$API_PORT}'
           value: '7443'
