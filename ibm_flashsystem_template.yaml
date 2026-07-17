@@ -408,7 +408,7 @@ zabbix_export:
         - uuid: 3bbde686c382492a80caa3b71ec7c6a7
           name: 'Event: Error trap'
           type: SNMP_TRAP
-          key: 'snmptrap[".1.3.6.1.4.1.2.6.190.1"]'
+          key: 'snmptrap["\.2\.6\.190\.(0\.)?1"]'
           history: 90d
           value_type: LOG
           description: 'IBM Spectrum Virtualize error notification (tsveETrap, OID .1.3.6.1.4.1.2.6.190.1).'
@@ -423,7 +423,7 @@ zabbix_export:
         - uuid: ebc46d9c47ea4d0ca0f15bd9570f88ae
           name: 'Event: Warning trap'
           type: SNMP_TRAP
-          key: 'snmptrap[".1.3.6.1.4.1.2.6.190.2"]'
+          key: 'snmptrap["\.2\.6\.190\.(0\.)?2"]'
           history: 90d
           value_type: LOG
           description: 'IBM Spectrum Virtualize warning notification (tsveWTrap, OID .1.3.6.1.4.1.2.6.190.2).'
@@ -437,7 +437,7 @@ zabbix_export:
         - uuid: 2f1f90afaa1a4301ada4000f0d739338
           name: 'Event: Informational trap'
           type: SNMP_TRAP
-          key: 'snmptrap[".1.3.6.1.4.1.2.6.190.3"]'
+          key: 'snmptrap["\.2\.6\.190\.(0\.)?3"]'
           history: 30d
           value_type: LOG
           description: 'IBM Spectrum Virtualize informational notification (tsveITrap, OID .1.3.6.1.4.1.2.6.190.3).'
@@ -602,38 +602,6 @@ zabbix_export:
                   value: iscsi
                 - tag: node
                   value: '{#NODE_NAME}'
-          graph_prototypes:
-            - uuid: bf320ca259e7470bb69eb8e18911cdfc
-              name: 'Node [{#NODE_NAME}]: IOPS'
-              graph_items:
-                - color: 1A7C11
-                  item:
-                    host: 'IBM FlashSystem by HTTP'
-                    key: 'flashsystem.node.read.iops[{#NODE_ID}]'
-                - sortorder: '1'
-                  color: F63100
-                  item:
-                    host: 'IBM FlashSystem by HTTP'
-                    key: 'flashsystem.node.write.iops[{#NODE_ID}]'
-            - uuid: 926c18b0e1614c32b14162cfb26f1793
-              name: 'Node [{#NODE_NAME}]: Throughput'
-              graph_items:
-                - color: 1A7C11
-                  item:
-                    host: 'IBM FlashSystem by HTTP'
-                    key: 'flashsystem.node.read.mbps[{#NODE_ID}]'
-                - sortorder: '1'
-                  color: F63100
-                  item:
-                    host: 'IBM FlashSystem by HTTP'
-                    key: 'flashsystem.node.write.mbps[{#NODE_ID}]'
-            - uuid: 6c926f489b084693a04962a69c875cf8
-              name: 'Node [{#NODE_NAME}]: iSCSI throughput'
-              graph_items:
-                - color: 2774A4
-                  item:
-                    host: 'IBM FlashSystem by HTTP'
-                    key: 'flashsystem.node.iscsi.mbps[{#NODE_ID}]'
           master_item:
             key: flashsystem.data.performance
           lld_macro_paths:
@@ -922,6 +890,8 @@ zabbix_export:
               tags:
                 - tag: component
                   value: port
+                - tag: component
+                  value: network
                 - tag: scope
                   value: performance
                 - tag: protocol
@@ -1114,56 +1084,114 @@ zabbix_export:
                       value: AAAAG
             - name: 'Per node'
               widgets:
-                - type: graphprototype
-                  name: 'Node: IOPS'
-                  width: '72'
+                - type: svggraph
+                  name: 'Nodes: IOPS (read/write, all nodes)'
+                  width: '36'
                   height: '5'
                   fields:
+                    - type: STRING
+                      name: ds.0.color
+                      value: 1A7C11
+                    - type: STRING
+                      name: ds.0.items.0
+                      value: 'Node [*]: Read IOPS'
+                    - type: STRING
+                      name: ds.1.color
+                      value: F63100
+                    - type: STRING
+                      name: ds.1.items.0
+                      value: 'Node [*]: Write IOPS'
+                    - type: STRING
+                      name: lefty_min
+                      value: '0'
                     - type: INTEGER
-                      name: columns
+                      name: legend_lines
+                      value: '4'
+                    - type: INTEGER
+                      name: legend_statistic
                       value: '1'
-                    - type: GRAPH_PROTOTYPE
-                      name: graphid.0
-                      value:
-                        host: 'IBM FlashSystem by HTTP'
-                        name: 'Node [{#NODE_NAME}]: IOPS'
                     - type: STRING
                       name: reference
-                      value: AAAAE
-                - type: graphprototype
-                  name: 'Node: Throughput'
+                      value: AAABA
+                - type: svggraph
+                  name: 'Nodes: iSCSI IOPS (all nodes)'
+                  x: '36'
+                  width: '36'
+                  height: '5'
+                  fields:
+                    - type: STRING
+                      name: ds.0.color
+                      value: 2774A4
+                    - type: STRING
+                      name: ds.0.items.0
+                      value: 'Node [*]: iSCSI IOPS'
+                    - type: STRING
+                      name: lefty_min
+                      value: '0'
+                    - type: INTEGER
+                      name: legend_lines
+                      value: '4'
+                    - type: INTEGER
+                      name: legend_statistic
+                      value: '1'
+                    - type: STRING
+                      name: reference
+                      value: AAABB
+                - type: svggraph
+                  name: 'Nodes: Throughput (read/write, all nodes)'
                   'y': '5'
-                  width: '72'
+                  width: '36'
                   height: '5'
                   fields:
+                    - type: STRING
+                      name: ds.0.color
+                      value: 1A7C11
+                    - type: STRING
+                      name: ds.0.items.0
+                      value: 'Node [*]: Read throughput'
+                    - type: STRING
+                      name: ds.1.color
+                      value: F63100
+                    - type: STRING
+                      name: ds.1.items.0
+                      value: 'Node [*]: Write throughput'
+                    - type: STRING
+                      name: lefty_min
+                      value: '0'
                     - type: INTEGER
-                      name: columns
+                      name: legend_lines
+                      value: '4'
+                    - type: INTEGER
+                      name: legend_statistic
                       value: '1'
-                    - type: GRAPH_PROTOTYPE
-                      name: graphid.0
-                      value:
-                        host: 'IBM FlashSystem by HTTP'
-                        name: 'Node [{#NODE_NAME}]: Throughput'
                     - type: STRING
                       name: reference
-                      value: AAAAF
-                - type: graphprototype
-                  name: 'Node: iSCSI throughput'
-                  'y': '10'
-                  width: '72'
+                      value: AAABC
+                - type: svggraph
+                  name: 'Nodes: iSCSI throughput (all nodes)'
+                  x: '36'
+                  'y': '5'
+                  width: '36'
                   height: '5'
                   fields:
+                    - type: STRING
+                      name: ds.0.color
+                      value: 2774A4
+                    - type: STRING
+                      name: ds.0.items.0
+                      value: 'Node [*]: iSCSI throughput'
+                    - type: STRING
+                      name: lefty_min
+                      value: '0'
                     - type: INTEGER
-                      name: columns
+                      name: legend_lines
+                      value: '4'
+                    - type: INTEGER
+                      name: legend_statistic
                       value: '1'
-                    - type: GRAPH_PROTOTYPE
-                      name: graphid.0
-                      value:
-                        host: 'IBM FlashSystem by HTTP'
-                        name: 'Node [{#NODE_NAME}]: iSCSI throughput'
                     - type: STRING
                       name: reference
-                      value: AAAAH
+                      value: AAABD
         - uuid: ee3ee3284598489d8c5f962376e989c2
           name: 'Volumes (LUN administration)'
           auto_start: 'NO'
@@ -1451,8 +1479,9 @@ zabbix_export:
         - tag: scope
           value: availability
     - uuid: d88d7d6508984f96aa36d8c2aca75c44
-      expression: 'length(last(/IBM FlashSystem by HTTP/snmptrap[".1.3.6.1.4.1.2.6.190.1"]))>0'
+      expression: 'length(last(/IBM FlashSystem by HTTP/snmptrap["\.2\.6\.190\.(0\.)?1"]))>0'
       name: 'FlashSystem: Error trap received'
+      event_name: 'FlashSystem error: {{ITEM.VALUE}.regsub("#\s*Object\s+Type\s*=\s*([^\"]*)","\1")} - {{ITEM.VALUE}.regsub("#\s*Error\s+ID\s*=\s*([^\"]*)","\1")} (node {{ITEM.VALUE}.regsub("#\s*Node\s+ID\s*=\s*([^\"]*)","\1")})'
       priority: HIGH
       description: 'An IBM Spectrum Virtualize error trap (tsveETrap) was received. See the item value for the trap varbinds (error code, object, node).'
       manual_close: 'YES'
@@ -1462,9 +1491,14 @@ zabbix_export:
           value: availability
         - tag: severity
           value: error
+        - tag: alert_type
+          value: '{{ITEM.VALUE}.regsub("#\s*Object\s+Type\s*=\s*([^\"]*)","\1")}'
+        - tag: error_code
+          value: '{{ITEM.VALUE}.regsub("#\s*Error\s+Code\s*=\s*([^\"]*)","\1")}'
     - uuid: bfcc3e7ce02b4146be997d24c97aa127
-      expression: 'length(last(/IBM FlashSystem by HTTP/snmptrap[".1.3.6.1.4.1.2.6.190.2"]))>0'
+      expression: 'length(last(/IBM FlashSystem by HTTP/snmptrap["\.2\.6\.190\.(0\.)?2"]))>0'
       name: 'FlashSystem: Warning trap received'
+      event_name: 'FlashSystem warning: {{ITEM.VALUE}.regsub("#\s*Object\s+Type\s*=\s*([^\"]*)","\1")} - {{ITEM.VALUE}.regsub("#\s*Error\s+ID\s*=\s*([^\"]*)","\1")} (node {{ITEM.VALUE}.regsub("#\s*Node\s+ID\s*=\s*([^\"]*)","\1")})'
       priority: WARNING
       description: 'An IBM Spectrum Virtualize warning trap (tsveWTrap) was received. See the item value for the trap varbinds.'
       manual_close: 'YES'
@@ -1474,9 +1508,14 @@ zabbix_export:
           value: availability
         - tag: severity
           value: warning
+        - tag: alert_type
+          value: '{{ITEM.VALUE}.regsub("#\s*Object\s+Type\s*=\s*([^\"]*)","\1")}'
+        - tag: error_code
+          value: '{{ITEM.VALUE}.regsub("#\s*Error\s+Code\s*=\s*([^\"]*)","\1")}'
     - uuid: 9edf8202817742c29bf1eed841a0cad9
-      expression: 'length(last(/IBM FlashSystem by HTTP/snmptrap[".1.3.6.1.4.1.2.6.190.3"]))>0'
+      expression: 'length(last(/IBM FlashSystem by HTTP/snmptrap["\.2\.6\.190\.(0\.)?3"]))>0'
       name: 'FlashSystem: Informational trap received'
+      event_name: 'FlashSystem info: {{ITEM.VALUE}.regsub("#\s*Object\s+Type\s*=\s*([^\"]*)","\1")} - {{ITEM.VALUE}.regsub("#\s*Error\s+ID\s*=\s*([^\"]*)","\1")} (node {{ITEM.VALUE}.regsub("#\s*Node\s+ID\s*=\s*([^\"]*)","\1")})'
       priority: INFO
       description: 'An IBM Spectrum Virtualize informational trap (tsveITrap) was received.'
       manual_close: 'YES'
@@ -1486,6 +1525,10 @@ zabbix_export:
           value: availability
         - tag: severity
           value: info
+        - tag: alert_type
+          value: '{{ITEM.VALUE}.regsub("#\s*Object\s+Type\s*=\s*([^\"]*)","\1")}'
+        - tag: error_code
+          value: '{{ITEM.VALUE}.regsub("#\s*Error\s+Code\s*=\s*([^\"]*)","\1")}'
   graphs:
     - uuid: 887068284f1c411588ae25a4896c01ba
       name: 'System: IOPS'

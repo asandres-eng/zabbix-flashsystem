@@ -103,9 +103,13 @@ Varbinds (`ibm2145TSVEObjects .4.N`) available for the message/trigger:
 This **replaces** polling for drive, enclosure, battery, canister, PSU, array status and
 volume failure — and removes the corresponding hardware LLDs.
 
-**Template items:** 3 `snmptrap[...]` items matched by trap OID. The full trap text is kept in
-the item value (LOG) and surfaced in the trigger operational data (`{ITEM.LASTVALUE1}`);
-symbolic varbind name resolution is delegated to `snmptrapd` + the MIB. Triggers:
+**Template items:** 3 `snmptrap[...]` items matched by trap OID. `snmptrapd` renders the OID
+symbolically (`enterprises.2.6.190.N`), so the match regex is `\.2\.6\.190\.(0\.)?N` — the tail
+catches the symbolic form, the fully-numeric form, and the SNMPv1 `…190.0.N` form (optional
+`(0\.)?`). The full trap text is kept in the item value (LOG). Each varbind arrives labeled as
+`"# <Label> = <value>"` (e.g. `# Object Type = battery`, `# Error ID = …`, `# Node ID = 1`); the
+trigger **Event name** and the `alert_type`/`error_code` **tags** are built with `regsub` on
+those labels, so each problem is self-describing (type, object, code, node). Triggers:
 Error→HIGH, Warning→WARNING, Info→INFO. Because traps are events (SVC does not send a reliable
 clear), triggers use `manual_close: YES`; a trap item only re-evaluates its trigger when a new
 trap arrives, so manual close is not defeated by stale data.

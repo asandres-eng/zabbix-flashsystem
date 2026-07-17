@@ -14,7 +14,8 @@ did not scale.
   mapped to trigger severities. Hardware/link failures (battery status/EOL, port link
   up/down, etc.) are covered **here**, not by polling — the REST items above are
   historical-metric-only and carry no failure/status triggers.
-- **Dashboards:** *Performance* (system + per-node graphs, incl. iSCSI), *Volumes (LUN
+- **Dashboards:** *Performance* (system graphs + a per-node page where each chart overlays
+  **all nodes** — IOPS read/write, iSCSI IOPS, throughput read/write, iSCSI throughput), *Volumes (LUN
   administration)* (utilization honeycomb + per-volume growth), *Storage administration*
   (pool capacity, health tiles, battery charge, iSCSI port negotiated-speed honeycomb). The
   port speed has no trend graph (the value is near-constant) — a speed change or link-down is
@@ -65,6 +66,18 @@ time `.10`, object type `.11`, object id `.12`, object name `.17`. The full trap
 in the item value and surfaced in the trigger operational data. Trap triggers use
 `manual_close: YES` (Spectrum Virtualize does not send a reliable clear).
 
+> **Trap matching (validated against a real 9.1.0 trap).** `snmptrapd` renders the trap OID
+> **symbolically** as `enterprises.2.6.190.N` (not fully numeric), so the `snmptrap[...]` item
+> regex is `\.2\.6\.190\.(0\.)?N`. That tail matches the symbolic form, the fully-numeric form
+> (`…2.6.190.N`) **and** the SNMPv1 form (`…190.0.N`, via the optional `(0\.)?`). N = 1 error /
+> 2 warning / 3 info — each trap matches exactly one item.
+>
+> **Readable problems.** The array packs each varbind as `"# <Label> = <value>"` (e.g.
+> `# Object Type = battery`, `# Error ID = 1135 : …`, `# Node ID = 1`). The trigger **Event
+> name** and the `alert_type` / `error_code` **tags** are built with `regsub` on those labels,
+> so a problem reads e.g. `FlashSystem error: battery - 1135 : Battery fault (node 1)` with
+> `alert_type=battery`. Tune the `regsub` labels only if a future code level changes the text.
+
 ## Install
 
 1. In Zabbix (**7.0+**): *Data collection → Templates → Import* → `ibm_flashsystem_template.yaml`.
@@ -111,8 +124,15 @@ The collectors depend on the exact `stat_name` values returned by `lssystemstats
    prototypes populate.
 6. **Thresholds:** confirm the per-volume and per-pool `%` triggers fire. (Ports and batteries
    are metric-only — no triggers by design; failures come via traps.)
-7. **Traps:** generate a test event on the array; confirm reception in `snmptrapd`, item
-   matching and severity classification.
+7. **Traps:** generate a test event on the array (or send a synthetic trap), confirm
+   reception in `snmptrapd`, item matching and severity classification. Quick synthetic tests
+   (the trap must arrive from the host's SNMP-interface IP to match the host — temporarily
+   point the interface at the sending host if needed):
+   - SNMPv1 (IBM default → OID becomes `…190.0.1`):
+     `snmptrap -v1 -c <community> <zabbix_ip> .1.3.6.1.4.1.2.6.190 <src_ip> 6 1 '' .1.3.6.1.4.1.2.6.190.4.4 s "1234"`
+   - SNMPv2c (`…190.1`):
+     `snmptrap -v2c -c <community> <zabbix_ip> '' .1.3.6.1.4.1.2.6.190.1 .1.3.6.1.4.1.2.6.190.4.4 s "1234"`
+   Both must land on *Event: Error trap* and raise the HIGH trigger.
 
 > **Note (fully-allocated volumes):** for fully-allocated volumes `used_capacity == capacity`
 > (always 100%); real growth is only observable on thin/compressed volumes. All are monitored,
