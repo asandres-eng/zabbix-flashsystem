@@ -120,6 +120,13 @@ zabbix_export:
                 var mult = {'':1, K:1024, M:1048576, G:1073741824, T:1099511627776, P:1125899906842624};
                 return parseFloat(m[1]) * (mult[m[2].toUpperCase()] || 1);
             }
+            function parseSpeed(v) {
+                if (!v) return 0;
+                var m = ('' + v).match(/([0-9.]+)\s*([GMK]?)b/i);
+                if (!m) return 0;
+                var mult = { '': 1, K: 1e3, M: 1e6, G: 1e9 };
+                return parseFloat(m[1]) * (mult[m[2].toUpperCase()] || 1);
+            }
 
             var token = login();
 
@@ -139,7 +146,32 @@ zabbix_export:
             }
             var ev = call(token, 'lseventlog', { filtervalue: 'fixed=no' });
 
-            return JSON.stringify({ volumes: volumes, pools: pools, unfixed_events: ev.length });
+            var pe = call(token, 'lsportethernet');
+            var pmap = {};
+            for (var pi = 0; pi < pe.length; pi++) {
+                var pp = pe[pi];
+                var portid = pp.port_id === undefined ? pp.id : pp.port_id;
+                var pid = pp.node_id + '/' + portid;
+                var rawspeed = pp.port_speed || pp.speed || '';
+                var sp = parseSpeed(rawspeed);
+                if (!pmap[pid] || (sp && !pmap[pid].speed_bps)) {
+                    pmap[pid] = { id: pid, node_id: '' + pp.node_id, node_name: pp.node_name || ('' + pp.node_id),
+                        port_id: '' + portid, speed_bps: sp, speed: rawspeed };
+                }
+            }
+            var ports = [];
+            for (var pk in pmap) ports.push(pmap[pk]);
+
+            var eb = call(token, 'lsenclosurebattery');
+            var batteries = [];
+            for (var bi = 0; bi < eb.length; bi++) {
+                var bb = eb[bi];
+                batteries.push({ id: bb.enclosure_id + '/' + bb.battery_id,
+                    enclosure_id: '' + bb.enclosure_id, battery_id: '' + bb.battery_id,
+                    percent_charged: bb.percent_charged === undefined ? 0 : Number(bb.percent_charged) });
+            }
+
+            return JSON.stringify({ volumes: volumes, pools: pools, unfixed_events: ev.length, ports: ports, batteries: batteries });
           timeout: 30s
           parameters:
             - name: host
@@ -313,6 +345,49 @@ zabbix_export:
               value: system
             - tag: scope
               value: performance
+        - uuid: 377c89eaa1424e4dab8c64abc479fb99
+          name: 'System: iSCSI throughput'
+          type: DEPENDENT
+          key: flashsystem.system.iscsi.mbps
+          value_type: FLOAT
+          units: MBps
+          master_item:
+            key: flashsystem.data.performance
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.system.iscsi_mb'
+            - type: DISCARD_UNCHANGED_HEARTBEAT
+              parameters:
+                - 1h
+          tags:
+            - tag: component
+              value: system
+            - tag: scope
+              value: performance
+            - tag: protocol
+              value: iscsi
+        - uuid: ae757a21b8964c4fb692b0e1f5a4a9cf
+          name: 'System: iSCSI IOPS'
+          type: DEPENDENT
+          key: flashsystem.system.iscsi.iops
+          value_type: FLOAT
+          master_item:
+            key: flashsystem.data.performance
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.system.iscsi_io'
+            - type: DISCARD_UNCHANGED_HEARTBEAT
+              parameters:
+                - 1h
+          tags:
+            - tag: component
+              value: system
+            - tag: scope
+              value: performance
+            - tag: protocol
+              value: iscsi
         - uuid: 1d450977152b4e229a45e01d966c3b48
           name: 'Health: Unfixed events'
           type: DEPENDENT
@@ -480,6 +555,85 @@ zabbix_export:
                   value: performance
                 - tag: node
                   value: '{#NODE_NAME}'
+            - uuid: 965cfc17442647a580d450de2257bebf
+              name: 'Node [{#NODE_NAME}]: iSCSI throughput'
+              type: DEPENDENT
+              key: 'flashsystem.node.iscsi.mbps[{#NODE_ID}]'
+              value_type: FLOAT
+              units: MBps
+              master_item:
+                key: flashsystem.data.performance
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - "$.nodes[?(@.node_id=='{#NODE_ID}')].stats.iscsi_mb.first()"
+                - type: DISCARD_UNCHANGED_HEARTBEAT
+                  parameters:
+                    - 1h
+              tags:
+                - tag: component
+                  value: node
+                - tag: scope
+                  value: performance
+                - tag: protocol
+                  value: iscsi
+                - tag: node
+                  value: '{#NODE_NAME}'
+            - uuid: 7e2416cdc8254c48aff39ee3c1cd7201
+              name: 'Node [{#NODE_NAME}]: iSCSI IOPS'
+              type: DEPENDENT
+              key: 'flashsystem.node.iscsi.iops[{#NODE_ID}]'
+              value_type: FLOAT
+              master_item:
+                key: flashsystem.data.performance
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - "$.nodes[?(@.node_id=='{#NODE_ID}')].stats.iscsi_io.first()"
+                - type: DISCARD_UNCHANGED_HEARTBEAT
+                  parameters:
+                    - 1h
+              tags:
+                - tag: component
+                  value: node
+                - tag: scope
+                  value: performance
+                - tag: protocol
+                  value: iscsi
+                - tag: node
+                  value: '{#NODE_NAME}'
+          graph_prototypes:
+            - uuid: bf320ca259e7470bb69eb8e18911cdfc
+              name: 'Node [{#NODE_NAME}]: IOPS'
+              graph_items:
+                - color: 1A7C11
+                  item:
+                    host: 'IBM FlashSystem by HTTP'
+                    key: 'flashsystem.node.read.iops[{#NODE_ID}]'
+                - sortorder: '1'
+                  color: F63100
+                  item:
+                    host: 'IBM FlashSystem by HTTP'
+                    key: 'flashsystem.node.write.iops[{#NODE_ID}]'
+            - uuid: 926c18b0e1614c32b14162cfb26f1793
+              name: 'Node [{#NODE_NAME}]: Throughput'
+              graph_items:
+                - color: 1A7C11
+                  item:
+                    host: 'IBM FlashSystem by HTTP'
+                    key: 'flashsystem.node.read.mbps[{#NODE_ID}]'
+                - sortorder: '1'
+                  color: F63100
+                  item:
+                    host: 'IBM FlashSystem by HTTP'
+                    key: 'flashsystem.node.write.mbps[{#NODE_ID}]'
+            - uuid: 6c926f489b084693a04962a69c875cf8
+              name: 'Node [{#NODE_NAME}]: iSCSI throughput'
+              graph_items:
+                - color: 2774A4
+                  item:
+                    host: 'IBM FlashSystem by HTTP'
+                    key: 'flashsystem.node.iscsi.mbps[{#NODE_ID}]'
           master_item:
             key: flashsystem.data.performance
           lld_macro_paths:
@@ -585,6 +739,19 @@ zabbix_export:
                   value: volume
                 - tag: scope
                   value: capacity
+          graph_prototypes:
+            - uuid: 92e243650b424c0e9352576ab6b2571b
+              name: 'Volume [{#VOLUME_NAME}]: Space'
+              graph_items:
+                - color: 1A7C11
+                  item:
+                    host: 'IBM FlashSystem by HTTP'
+                    key: 'flashsystem.volume.capacity[{#VOLUME_ID}]'
+                - sortorder: '1'
+                  color: F63100
+                  item:
+                    host: 'IBM FlashSystem by HTTP'
+                    key: 'flashsystem.volume.used[{#VOLUME_ID}]'
           master_item:
             key: flashsystem.data.capacity
           lld_macro_paths:
@@ -707,6 +874,19 @@ zabbix_export:
                   value: pool
                 - tag: scope
                   value: capacity
+          graph_prototypes:
+            - uuid: eddb65adc1024abda09d337464770d6f
+              name: 'Pool [{#POOL_NAME}]: Space'
+              graph_items:
+                - color: 1A7C11
+                  item:
+                    host: 'IBM FlashSystem by HTTP'
+                    key: 'flashsystem.pool.free[{#POOL_ID}]'
+                - sortorder: '1'
+                  color: 2774A4
+                  item:
+                    host: 'IBM FlashSystem by HTTP'
+                    key: 'flashsystem.pool.capacity[{#POOL_ID}]'
           master_item:
             key: flashsystem.data.capacity
           lld_macro_paths:
@@ -718,6 +898,98 @@ zabbix_export:
             - type: JSONPATH
               parameters:
                 - '$.pools'
+        - uuid: c2f2ebc942a34dc090642d62294aea40
+          name: 'iSCSI port discovery'
+          type: DEPENDENT
+          key: flashsystem.port.discovery
+          description: 'Discovers physical Ethernet ports (lsportethernet; replaces the deprecated lsportip on 8.4.2+). Historical metrics only; link failure/disconnection is handled by SNMP traps.'
+          item_prototypes:
+            - uuid: 90f1a029ae4642de8629b898c67c140e
+              name: 'Port [{#NODE_NAME}/{#PORT_ID}]: Negotiated speed'
+              type: DEPENDENT
+              key: 'flashsystem.port.speed["{#PORT_UID}"]'
+              value_type: FLOAT
+              units: bps
+              master_item:
+                key: flashsystem.data.capacity
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - "$.ports[?(@.id=='{#PORT_UID}')].speed_bps.first()"
+                - type: DISCARD_UNCHANGED_HEARTBEAT
+                  parameters:
+                    - 1h
+              tags:
+                - tag: component
+                  value: port
+                - tag: scope
+                  value: performance
+                - tag: protocol
+                  value: iscsi
+                - tag: node
+                  value: '{#NODE_NAME}'
+          master_item:
+            key: flashsystem.data.capacity
+          lld_macro_paths:
+            - lld_macro: '{#PORT_UID}'
+              path: '$.id'
+            - lld_macro: '{#NODE_ID}'
+              path: '$.node_id'
+            - lld_macro: '{#NODE_NAME}'
+              path: '$.node_name'
+            - lld_macro: '{#PORT_ID}'
+              path: '$.port_id'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.ports'
+        - uuid: 1a66a7de3cec4f41a7a5d1769d5f1164
+          name: 'Battery discovery'
+          type: DEPENDENT
+          key: flashsystem.battery.discovery
+          description: 'Discovers node/enclosure batteries (lsenclosurebattery). Charge metric only; battery status/EOL and failures are handled by SNMP traps.'
+          item_prototypes:
+            - uuid: 87717382765443e287da68160aae3de3
+              name: 'Battery [{#ENCLOSURE_ID}/{#BATTERY_ID}]: Charge'
+              type: DEPENDENT
+              key: 'flashsystem.battery.charge["{#BATTERY_UID}"]'
+              value_type: FLOAT
+              units: '%'
+              master_item:
+                key: flashsystem.data.capacity
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - "$.batteries[?(@.id=='{#BATTERY_UID}')].percent_charged.first()"
+                - type: DISCARD_UNCHANGED_HEARTBEAT
+                  parameters:
+                    - 1h
+              tags:
+                - tag: component
+                  value: battery
+                - tag: scope
+                  value: capacity
+          graph_prototypes:
+            - uuid: ceb1e97e38804caebc8658699aef6daf
+              name: 'Battery [{#ENCLOSURE_ID}/{#BATTERY_ID}]: Charge'
+              graph_items:
+                - color: 1A7C11
+                  item:
+                    host: 'IBM FlashSystem by HTTP'
+                    key: 'flashsystem.battery.charge["{#BATTERY_UID}"]'
+          master_item:
+            key: flashsystem.data.capacity
+          lld_macro_paths:
+            - lld_macro: '{#BATTERY_UID}'
+              path: '$.id'
+            - lld_macro: '{#ENCLOSURE_ID}'
+              path: '$.enclosure_id'
+            - lld_macro: '{#BATTERY_ID}'
+              path: '$.battery_id'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.batteries'
       tags:
         - tag: class
           value: storage
@@ -764,6 +1036,387 @@ zabbix_export:
               newvalue: Down
             - value: '1'
               newvalue: Up
+      dashboards:
+        - uuid: c373a6d98b2f49f7afefee3b34deeafc
+          name: Performance
+          auto_start: 'NO'
+          pages:
+            - name: System
+              widgets:
+                - type: graph
+                  name: 'System: IOPS'
+                  width: '72'
+                  height: '5'
+                  fields:
+                    - type: GRAPH
+                      name: graphid.0
+                      value:
+                        host: 'IBM FlashSystem by HTTP'
+                        name: 'System: IOPS'
+                    - type: STRING
+                      name: reference
+                      value: AAAAA
+                - type: graph
+                  name: 'System: Throughput'
+                  'y': '5'
+                  width: '72'
+                  height: '5'
+                  fields:
+                    - type: GRAPH
+                      name: graphid.0
+                      value:
+                        host: 'IBM FlashSystem by HTTP'
+                        name: 'System: Throughput'
+                    - type: STRING
+                      name: reference
+                      value: AAAAB
+                - type: graph
+                  name: 'System: Latency'
+                  'y': '10'
+                  width: '72'
+                  height: '5'
+                  fields:
+                    - type: GRAPH
+                      name: graphid.0
+                      value:
+                        host: 'IBM FlashSystem by HTTP'
+                        name: 'System: Latency'
+                    - type: STRING
+                      name: reference
+                      value: AAAAC
+                - type: graph
+                  name: 'System: CPU and cache utilization'
+                  'y': '15'
+                  width: '72'
+                  height: '5'
+                  fields:
+                    - type: GRAPH
+                      name: graphid.0
+                      value:
+                        host: 'IBM FlashSystem by HTTP'
+                        name: 'System: CPU and cache utilization'
+                    - type: STRING
+                      name: reference
+                      value: AAAAD
+                - type: graph
+                  name: 'System: iSCSI throughput'
+                  'y': '20'
+                  width: '72'
+                  height: '5'
+                  fields:
+                    - type: GRAPH
+                      name: graphid.0
+                      value:
+                        host: 'IBM FlashSystem by HTTP'
+                        name: 'System: iSCSI throughput'
+                    - type: STRING
+                      name: reference
+                      value: AAAAG
+            - name: 'Per node'
+              widgets:
+                - type: graphprototype
+                  name: 'Node: IOPS'
+                  width: '72'
+                  height: '5'
+                  fields:
+                    - type: INTEGER
+                      name: columns
+                      value: '1'
+                    - type: GRAPH_PROTOTYPE
+                      name: graphid.0
+                      value:
+                        host: 'IBM FlashSystem by HTTP'
+                        name: 'Node [{#NODE_NAME}]: IOPS'
+                    - type: STRING
+                      name: reference
+                      value: AAAAE
+                - type: graphprototype
+                  name: 'Node: Throughput'
+                  'y': '5'
+                  width: '72'
+                  height: '5'
+                  fields:
+                    - type: INTEGER
+                      name: columns
+                      value: '1'
+                    - type: GRAPH_PROTOTYPE
+                      name: graphid.0
+                      value:
+                        host: 'IBM FlashSystem by HTTP'
+                        name: 'Node [{#NODE_NAME}]: Throughput'
+                    - type: STRING
+                      name: reference
+                      value: AAAAF
+                - type: graphprototype
+                  name: 'Node: iSCSI throughput'
+                  'y': '10'
+                  width: '72'
+                  height: '5'
+                  fields:
+                    - type: INTEGER
+                      name: columns
+                      value: '1'
+                    - type: GRAPH_PROTOTYPE
+                      name: graphid.0
+                      value:
+                        host: 'IBM FlashSystem by HTTP'
+                        name: 'Node [{#NODE_NAME}]: iSCSI throughput'
+                    - type: STRING
+                      name: reference
+                      value: AAAAH
+        - uuid: ee3ee3284598489d8c5f962376e989c2
+          name: 'Volumes (LUN administration)'
+          auto_start: 'NO'
+          pages:
+            - name: 'Utilization overview'
+              widgets:
+                - type: honeycomb
+                  name: 'Volumes: Space utilization (%)'
+                  width: '72'
+                  height: '8'
+                  fields:
+                    - type: STRING
+                      name: items.0
+                      value: 'Volume [*]: Space utilization'
+                    - type: STRING
+                      name: primary_label
+                      value: '{{ITEM.NAME}.regsub("Volume \[(.*)]: Space utilization","\1")}'
+                    - type: STRING
+                      name: reference
+                      value: BAAAA
+                    - type: INTEGER
+                      name: secondary_label_decimal_places
+                      value: '0'
+                    - type: STRING
+                      name: thresholds.0.color
+                      value: '1A7C11'
+                    - type: STRING
+                      name: thresholds.0.threshold
+                      value: '0'
+                    - type: STRING
+                      name: thresholds.1.color
+                      value: F7941D
+                    - type: STRING
+                      name: thresholds.1.threshold
+                      value: '80'
+                    - type: STRING
+                      name: thresholds.2.color
+                      value: F63100
+                    - type: STRING
+                      name: thresholds.2.threshold
+                      value: '90'
+            - name: 'Per volume'
+              widgets:
+                - type: graphprototype
+                  name: 'Volume: Space'
+                  width: '72'
+                  height: '5'
+                  fields:
+                    - type: INTEGER
+                      name: columns
+                      value: '1'
+                    - type: GRAPH_PROTOTYPE
+                      name: graphid.0
+                      value:
+                        host: 'IBM FlashSystem by HTTP'
+                        name: 'Volume [{#VOLUME_NAME}]: Space'
+                    - type: STRING
+                      name: reference
+                      value: BAAAB
+        - uuid: fd2547fcb7134775bfaa3cf5370296a7
+          name: 'Storage administration'
+          auto_start: 'NO'
+          pages:
+            - name: 'Pools & capacity'
+              widgets:
+                - type: honeycomb
+                  name: 'Pools: Space utilization (%)'
+                  width: '72'
+                  height: '6'
+                  fields:
+                    - type: STRING
+                      name: items.0
+                      value: 'Pool [*]: Space utilization'
+                    - type: STRING
+                      name: primary_label
+                      value: '{{ITEM.NAME}.regsub("Pool \[(.*)]: Space utilization","\1")}'
+                    - type: STRING
+                      name: reference
+                      value: CAAAA
+                    - type: INTEGER
+                      name: secondary_label_decimal_places
+                      value: '0'
+                    - type: STRING
+                      name: thresholds.0.color
+                      value: '1A7C11'
+                    - type: STRING
+                      name: thresholds.0.threshold
+                      value: '0'
+                    - type: STRING
+                      name: thresholds.1.color
+                      value: F7941D
+                    - type: STRING
+                      name: thresholds.1.threshold
+                      value: '80'
+                    - type: STRING
+                      name: thresholds.2.color
+                      value: F63100
+                    - type: STRING
+                      name: thresholds.2.threshold
+                      value: '95'
+                - type: graphprototype
+                  name: 'Pool: Space'
+                  'y': '6'
+                  width: '72'
+                  height: '6'
+                  fields:
+                    - type: INTEGER
+                      name: columns
+                      value: '1'
+                    - type: GRAPH_PROTOTYPE
+                      name: graphid.0
+                      value:
+                        host: 'IBM FlashSystem by HTTP'
+                        name: 'Pool [{#POOL_NAME}]: Space'
+                    - type: STRING
+                      name: reference
+                      value: CAAAB
+            - name: 'Health & status'
+              widgets:
+                - type: item
+                  name: 'Unfixed events'
+                  width: '18'
+                  height: '4'
+                  fields:
+                    - type: INTEGER
+                      name: decimal_places
+                      value: '0'
+                    - type: ITEM
+                      name: itemid.0
+                      value:
+                        host: 'IBM FlashSystem by HTTP'
+                        key: flashsystem.health.unfixed
+                    - type: INTEGER
+                      name: show.0
+                      value: '1'
+                    - type: INTEGER
+                      name: show.1
+                      value: '2'
+                - type: item
+                  name: 'CPU utilization'
+                  x: '18'
+                  width: '18'
+                  height: '4'
+                  fields:
+                    - type: INTEGER
+                      name: decimal_places
+                      value: '1'
+                    - type: ITEM
+                      name: itemid.0
+                      value:
+                        host: 'IBM FlashSystem by HTTP'
+                        key: flashsystem.system.cpu
+                    - type: INTEGER
+                      name: show.0
+                      value: '1'
+                    - type: INTEGER
+                      name: show.1
+                      value: '2'
+                - type: item
+                  name: 'Cache utilization'
+                  x: '36'
+                  width: '18'
+                  height: '4'
+                  fields:
+                    - type: INTEGER
+                      name: decimal_places
+                      value: '1'
+                    - type: ITEM
+                      name: itemid.0
+                      value:
+                        host: 'IBM FlashSystem by HTTP'
+                        key: flashsystem.system.cache
+                    - type: INTEGER
+                      name: show.0
+                      value: '1'
+                    - type: INTEGER
+                      name: show.1
+                      value: '2'
+                - type: item
+                  name: 'ICMP ping'
+                  x: '54'
+                  width: '18'
+                  height: '4'
+                  fields:
+                    - type: INTEGER
+                      name: decimal_places
+                      value: '0'
+                    - type: ITEM
+                      name: itemid.0
+                      value:
+                        host: 'IBM FlashSystem by HTTP'
+                        key: icmpping
+                    - type: INTEGER
+                      name: show.0
+                      value: '1'
+                    - type: INTEGER
+                      name: show.1
+                      value: '2'
+            - name: Hardware
+              widgets:
+                - type: honeycomb
+                  name: 'Battery charge (%)'
+                  width: '36'
+                  height: '5'
+                  fields:
+                    - type: STRING
+                      name: items.0
+                      value: 'Battery [*]: Charge'
+                    - type: STRING
+                      name: primary_label
+                      value: '{{ITEM.NAME}.regsub("Battery \[(.*)]: Charge","\1")}'
+                    - type: STRING
+                      name: reference
+                      value: CAAAG
+                    - type: INTEGER
+                      name: secondary_label_decimal_places
+                      value: '0'
+                    - type: STRING
+                      name: thresholds.0.color
+                      value: F63100
+                    - type: STRING
+                      name: thresholds.0.threshold
+                      value: '0'
+                    - type: STRING
+                      name: thresholds.1.color
+                      value: F7941D
+                    - type: STRING
+                      name: thresholds.1.threshold
+                      value: '50'
+                    - type: STRING
+                      name: thresholds.2.color
+                      value: '1A7C11'
+                    - type: STRING
+                      name: thresholds.2.threshold
+                      value: '90'
+                - type: honeycomb
+                  name: 'iSCSI port negotiated speed'
+                  x: '36'
+                  width: '36'
+                  height: '5'
+                  fields:
+                    - type: STRING
+                      name: items.0
+                      value: 'Port [*]: Negotiated speed'
+                    - type: STRING
+                      name: primary_label
+                      value: '{{ITEM.NAME}.regsub("Port \[(.*)]: Negotiated speed","\1")}'
+                    - type: STRING
+                      name: reference
+                      value: CAAAH
+                    - type: INTEGER
+                      name: secondary_label_decimal_places
+                      value: '0'
   triggers:
     - uuid: b0ad72a4abaa41889b36192ed64e6534
       expression: 'nodata(/IBM FlashSystem by HTTP/flashsystem.data.performance,10m)=1'
@@ -833,3 +1486,59 @@ zabbix_export:
           value: availability
         - tag: severity
           value: info
+  graphs:
+    - uuid: 887068284f1c411588ae25a4896c01ba
+      name: 'System: IOPS'
+      graph_items:
+        - color: 1A7C11
+          item:
+            host: 'IBM FlashSystem by HTTP'
+            key: flashsystem.system.read.iops
+        - sortorder: '1'
+          color: F63100
+          item:
+            host: 'IBM FlashSystem by HTTP'
+            key: flashsystem.system.write.iops
+    - uuid: b58154e551844b4eac332fee65a4e6ee
+      name: 'System: Throughput'
+      graph_items:
+        - color: 1A7C11
+          item:
+            host: 'IBM FlashSystem by HTTP'
+            key: flashsystem.system.read.mbps
+        - sortorder: '1'
+          color: F63100
+          item:
+            host: 'IBM FlashSystem by HTTP'
+            key: flashsystem.system.write.mbps
+    - uuid: e3f6a661af1949d7aa5ac583f3e0ac2c
+      name: 'System: Latency'
+      graph_items:
+        - color: 1A7C11
+          item:
+            host: 'IBM FlashSystem by HTTP'
+            key: flashsystem.system.read.latency
+        - sortorder: '1'
+          color: F63100
+          item:
+            host: 'IBM FlashSystem by HTTP'
+            key: flashsystem.system.write.latency
+    - uuid: 8f0da49acafb4012983f85571baf3a3a
+      name: 'System: CPU and cache utilization'
+      graph_items:
+        - color: 2774A4
+          item:
+            host: 'IBM FlashSystem by HTTP'
+            key: flashsystem.system.cpu
+        - sortorder: '1'
+          color: F7941D
+          item:
+            host: 'IBM FlashSystem by HTTP'
+            key: flashsystem.system.cache
+    - uuid: 64699da9f6724d65803395133d2d809a
+      name: 'System: iSCSI throughput'
+      graph_items:
+        - color: 2774A4
+          item:
+            host: 'IBM FlashSystem by HTTP'
+            key: flashsystem.system.iscsi.mbps

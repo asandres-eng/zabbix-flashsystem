@@ -6,13 +6,22 @@ It replaces the previous SSH/Go external-script approach (one SSH connection per
 did not scale.
 
 - **Metrics (REST polling):** system and per-node performance (IOPS, throughput, latency,
-  CPU, cache), per-volume space utilization, per-pool capacity, and an unfixed-events health
-  heartbeat. Two Script (JavaScript) collectors authenticate once per run and fan the result
-  out to dependent items via JSONPath.
+  CPU, cache — including per-node/system **iSCSI** throughput and IOPS), per-volume space
+  utilization, per-pool capacity, per-iSCSI-port **negotiated Ethernet speed**, per-battery
+  **charge**, and an unfixed-events health heartbeat. Two Script (JavaScript) collectors
+  authenticate once per run and fan the result out to dependent items via JSONPath.
 - **Health/status (SNMP traps):** error / warning / informational traps (per `SVC_MIB_9.1.0.MIB`)
-  mapped to trigger severities.
-- **Out of scope:** live per-LUN performance (IOPS/MBps per volume) — only available via scp
-  of the XML statistics files. Possible future phase.
+  mapped to trigger severities. Hardware/link failures (battery status/EOL, port link
+  up/down, etc.) are covered **here**, not by polling — the REST items above are
+  historical-metric-only and carry no failure/status triggers.
+- **Dashboards:** *Performance* (system + per-node graphs, incl. iSCSI), *Volumes (LUN
+  administration)* (utilization honeycomb + per-volume growth), *Storage administration*
+  (pool capacity, health tiles, battery charge, iSCSI port negotiated-speed honeycomb). The
+  port speed has no trend graph (the value is near-constant) — a speed change or link-down is
+  reported by the SNMP error/warning traps, not by polling.
+- **Out of scope:** live per-LUN performance (IOPS/MBps per volume) and live **per-physical-port
+  iSCSI throughput** — both only exist in the XML statistics files (scp), not in the REST API.
+  iSCSI throughput is therefore delivered at the system/node level (`iscsi_mb`/`iscsi_io`).
 
 Files:
 
@@ -88,14 +97,21 @@ The collectors depend on the exact `stat_name` values returned by `lssystemstats
 1. **Import** the YAML without schema errors.
 2. **Auth + performance:** *Test → Get value* on *Data collection: Performance*; confirm a
    token is returned and the `stat_name`s (`vdisk_r_io`, `vdisk_w_io`, `vdisk_r_mb`,
-   `vdisk_w_mb`, `vdisk_r_ms`, `vdisk_w_ms`, `cpu_pc`, `total_cache_pc`) match the dependent
-   item JSONPaths.
+   `vdisk_w_mb`, `vdisk_r_ms`, `vdisk_w_ms`, `cpu_pc`, `total_cache_pc`, and the iSCSI ones
+   `iscsi_mb` / `iscsi_io`) match the dependent item JSONPaths.
 3. **Capacity:** confirm `capacity`, `used_capacity`, `free_capacity`, `mdisk_grp_name`,
    `status`, and whether `{ "bytes": true }` is accepted (`toBytes` tolerates both numeric and
    unit-suffixed strings either way).
-4. **LLD:** confirm nodes, volumes and pools are discovered and prototypes populate.
-5. **Thresholds:** confirm the per-volume and per-pool `%` triggers fire.
-6. **Traps:** generate a test event on the array; confirm reception in `snmptrapd`, item
+4. **iSCSI ports & batteries:** confirm `lsportethernet` (replaces the deprecated `lsportip`
+   on 8.4.2+; needed for the 10/25GbE optical ports) exposes `node_id` / `port_id` /
+   `port_speed` (negotiated speed, e.g. `10Gb/s`; `parseSpeed` converts to bps — the collector
+   also falls back to a `speed` field and to `node_id` when `node_name` is absent), and that
+   `lsenclosurebattery` exposes `enclosure_id` / `battery_id` / `percent_charged`.
+5. **LLD:** confirm nodes, volumes, pools, iSCSI ports and batteries are discovered and
+   prototypes populate.
+6. **Thresholds:** confirm the per-volume and per-pool `%` triggers fire. (Ports and batteries
+   are metric-only — no triggers by design; failures come via traps.)
+7. **Traps:** generate a test event on the array; confirm reception in `snmptrapd`, item
    matching and severity classification.
 
 > **Note (fully-allocated volumes):** for fully-allocated volumes `used_capacity == capacity`

@@ -63,8 +63,22 @@ JSONPath preprocessing. Self-signed certificate → SSL verification is off by d
 - **Per LUN** (`lsvdisk`, via volume LLD): computed `used_capacity / capacity * 100` →
   utilization % + growth per volume.
 - **Per pool** (`lsmdiskgrp`, via pool LLD): capacity, free, used %, status.
+- **iSCSI throughput/IOPS** (system + per node): the `iscsi_mb` / `iscsi_io` stat names
+  already returned by `lssystemstats` / `lsnodestats` — no extra command.
+- **Per iSCSI port** (`lsportethernet`, via port LLD): negotiated Ethernet speed
+  (`port_speed` → bps). `lsportethernet` replaces the deprecated `lsportip` on 8.4.2+ and is
+  the one that reports the 10/25GbE optical adapter ports (`lsportip` returns the legacy
+  onboard 1GbE ports).
+- **Per battery** (`lsenclosurebattery`, via battery LLD): charge (`percent_charged`).
 - **Health heartbeat** (`lseventlog -filtervalue fixed=no`): count of unfixed events, as a
   complementary sanity check to the traps.
+
+**Metrics-only, no polled status (iSCSI transport):** this array is **iSCSI (IP-SAN)**, not
+FC. Port and battery items are **historical metrics only** — link up/down, battery
+status/EOL and other failures are reported via SNMP traps, so the REST items carry **no
+status/failure triggers**. True **per-physical-port throughput** is not in the REST API (it
+lives only in the XML stats files, like per-LUN performance); iSCSI throughput is therefore
+delivered at the system/node level.
 
 **Honesty note (fully-allocated volumes):** on *fully-allocated* volumes,
 `used_capacity == capacity` (always 100%); real growth is only observable on
