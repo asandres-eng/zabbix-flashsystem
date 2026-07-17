@@ -764,72 +764,72 @@ zabbix_export:
               newvalue: Down
             - value: '1'
               newvalue: Up
-      triggers:
-        - uuid: b0ad72a4abaa41889b36192ed64e6534
-          expression: 'nodata(/IBM FlashSystem by HTTP/flashsystem.data.performance,10m)=1'
-          name: 'FlashSystem: Performance collector is not returning data'
-          priority: WARNING
-          description: 'The REST performance collector has not produced data for 10 minutes. Check API credentials, port 7443 reachability and SSL.'
-          tags:
-            - tag: scope
-              value: availability
-        - uuid: 8f82cb8f88ff4433b3fea1ed02e2ba5c
-          expression: 'nodata(/IBM FlashSystem by HTTP/flashsystem.data.capacity,30m)=1'
-          name: 'FlashSystem: Capacity collector is not returning data'
-          priority: WARNING
-          description: 'The REST capacity collector has not produced data for 30 minutes. Check API credentials, port 7443 reachability and SSL.'
-          tags:
-            - tag: scope
-              value: availability
-        - uuid: 4e05a8cf3abd4df68fdca07e3cbcf6a8
-          expression: 'max(/IBM FlashSystem by HTTP/icmpping,#3)=0'
-          name: 'FlashSystem: Unavailable by ICMP ping'
-          priority: HIGH
-          description: 'Last three ICMP ping checks failed.'
-          tags:
-            - tag: scope
-              value: availability
-        - uuid: 59410d9e10e34fdf82f0e036f71c04fa
-          expression: 'last(/IBM FlashSystem by HTTP/flashsystem.health.unfixed)>0'
-          name: 'FlashSystem: There are unfixed events in the array'
-          priority: WARNING
-          description: 'One or more entries in the array event log are not marked as fixed. Safety net complementing SNMP traps.'
-          tags:
-            - tag: scope
-              value: availability
-        - uuid: d88d7d6508984f96aa36d8c2aca75c44
-          expression: 'length(last(/IBM FlashSystem by HTTP/snmptrap[".1.3.6.1.4.1.2.6.190.1"]))>0'
-          name: 'FlashSystem: Error trap received'
-          priority: HIGH
-          description: 'An IBM Spectrum Virtualize error trap (tsveETrap) was received. See the item value for the trap varbinds (error code, object, node).'
-          manual_close: 'YES'
-          opdata: '{ITEM.LASTVALUE1}'
-          tags:
-            - tag: scope
-              value: availability
-            - tag: severity
-              value: error
-        - uuid: bfcc3e7ce02b4146be997d24c97aa127
-          expression: 'length(last(/IBM FlashSystem by HTTP/snmptrap[".1.3.6.1.4.1.2.6.190.2"]))>0'
-          name: 'FlashSystem: Warning trap received'
-          priority: WARNING
-          description: 'An IBM Spectrum Virtualize warning trap (tsveWTrap) was received. See the item value for the trap varbinds.'
-          manual_close: 'YES'
-          opdata: '{ITEM.LASTVALUE1}'
-          tags:
-            - tag: scope
-              value: availability
-            - tag: severity
-              value: warning
-        - uuid: 9edf8202817742c29bf1eed841a0cad9
-          expression: 'length(last(/IBM FlashSystem by HTTP/snmptrap[".1.3.6.1.4.1.2.6.190.3"]))>0'
-          name: 'FlashSystem: Informational trap received'
-          priority: INFO
-          description: 'An IBM Spectrum Virtualize informational trap (tsveITrap) was received.'
-          manual_close: 'YES'
-          opdata: '{ITEM.LASTVALUE1}'
-          tags:
-            - tag: scope
-              value: availability
-            - tag: severity
-              value: info
+  triggers:
+    - uuid: b0ad72a4abaa41889b36192ed64e6534
+      expression: 'nodata(/IBM FlashSystem by HTTP/flashsystem.data.performance,10m)=1'
+      name: 'FlashSystem: Performance collector is not returning data'
+      priority: WARNING
+      description: 'The REST performance collector has not produced data for 10 minutes. Check API credentials, port 7443 reachability and SSL.'
+      tags:
+        - tag: scope
+          value: availability
+    - uuid: 8f82cb8f88ff4433b3fea1ed02e2ba5c
+      expression: 'nodata(/IBM FlashSystem by HTTP/flashsystem.data.capacity,30m)=1'
+      name: 'FlashSystem: Capacity collector is not returning data'
+      priority: WARNING
+      description: 'The REST capacity collector has not produced data for 30 minutes. Check API credentials, port 7443 reachability and SSL.'
+      tags:
+        - tag: scope
+          value: availability
+    - uuid: 4e05a8cf3abd4df68fdca07e3cbcf6a8
+      expression: 'max(/IBM FlashSystem by HTTP/icmpping,#3)=0'
+      name: 'FlashSystem: Unavailable by ICMP ping'
+      priority: HIGH
+      description: 'Last three ICMP ping checks failed.'
+      tags:
+        - tag: scope
+          value: availability
+    - uuid: 59410d9e10e34fdf82f0e036f71c04fa
+      expression: 'last(/IBM FlashSystem by HTTP/flashsystem.health.unfixed)>0'
+      name: 'FlashSystem: There are unfixed events in the array'
+      priority: WARNING
+      description: 'One or more entries in the array event log are not marked as fixed. Safety net complementing SNMP traps.'
+      tags:
+        - tag: scope
+          value: availability
+    - uuid: d88d7d6508984f96aa36d8c2aca75c44
+      expression: 'length(last(/IBM FlashSystem by HTTP/snmptrap[".1.3.6.1.4.1.2.6.190.1"]))>0'
+      name: 'FlashSystem: Error trap received'
+      priority: HIGH
+      description: 'An IBM Spectrum Virtualize error trap (tsveETrap) was received. See the item value for the trap varbinds (error code, object, node).'
+      manual_close: 'YES'
+      opdata: '{ITEM.LASTVALUE1}'
+      tags:
+        - tag: scope
+          value: availability
+        - tag: severity
+          value: error
+    - uuid: bfcc3e7ce02b4146be997d24c97aa127
+      expression: 'length(last(/IBM FlashSystem by HTTP/snmptrap[".1.3.6.1.4.1.2.6.190.2"]))>0'
+      name: 'FlashSystem: Warning trap received'
+      priority: WARNING
+      description: 'An IBM Spectrum Virtualize warning trap (tsveWTrap) was received. See the item value for the trap varbinds.'
+      manual_close: 'YES'
+      opdata: '{ITEM.LASTVALUE1}'
+      tags:
+        - tag: scope
+          value: availability
+        - tag: severity
+          value: warning
+    - uuid: 9edf8202817742c29bf1eed841a0cad9
+      expression: 'length(last(/IBM FlashSystem by HTTP/snmptrap[".1.3.6.1.4.1.2.6.190.3"]))>0'
+      name: 'FlashSystem: Informational trap received'
+      priority: INFO
+      description: 'An IBM Spectrum Virtualize informational trap (tsveITrap) was received.'
+      manual_close: 'YES'
+      opdata: '{ITEM.LASTVALUE1}'
+      tags:
+        - tag: scope
+          value: availability
+        - tag: severity
+          value: info
