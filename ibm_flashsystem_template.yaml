@@ -1,0 +1,835 @@
+zabbix_export:
+  version: '6.4'
+  template_groups:
+    - uuid: 86ccd7b57a994cfd9a35ea4f35ee4692
+      name: Templates/SAN
+  templates:
+    - uuid: 0593c032c42e4cb799b265f6eb395661
+      template: 'IBM FlashSystem by HTTP'
+      name: 'IBM FlashSystem by HTTP'
+      description: |
+        Monitoring of IBM FlashSystem / Spectrum Virtualize (code level 8.5+) via the native REST API (port 7443) plus SNMP traps.
+
+        Metrics (REST, polling): system and per-node performance (IOPS, throughput, latency, CPU, cache), per-volume space utilization, per-pool capacity, and an unfixed-events health heartbeat. Two Script (JavaScript) collectors authenticate once per run and fan out to dependent items.
+
+        Health/status events (SNMP traps, via SVC_MIB_9.1.0.MIB): error/warning/informational traps mapped to trigger severities.
+
+        Out of scope: live per-LUN performance (only available via scp of XML stats files).
+
+        Setup: see README.md. Requires macros {$API_USER}/{$API_PASSWORD}, REST port 7443 reachable, an SNMP interface on the host, and snmptrapd configured on the Zabbix side.
+      groups:
+        - name: Templates/SAN
+      items:
+        - uuid: 591143665f6248c5a34bbe8617566323
+          name: 'Data collection: Performance'
+          type: SCRIPT
+          key: flashsystem.data.performance
+          delay: '{$IBM.PERF.INTERVAL}'
+          history: 1h
+          trends: '0'
+          value_type: TEXT
+          params: |
+            var p = JSON.parse(value);
+            var base = 'https://' + p.host + ':' + p.port + '/rest';
+
+            function login() {
+                var r = new HttpRequest();
+                r.addHeader('Content-Type: application/json');
+                r.addHeader('X-Auth-Username: ' + p.user);
+                r.addHeader('X-Auth-Password: ' + p.password);
+                var resp = r.post(base + '/auth');
+                if (r.getStatus() !== 200) throw 'auth HTTP ' + r.getStatus() + ': ' + resp;
+                return JSON.parse(resp).token;
+            }
+            function call(token, cmd, body) {
+                var r = new HttpRequest();
+                r.addHeader('Content-Type: application/json');
+                r.addHeader('X-Auth-Token: ' + token);
+                var resp = r.post(base + '/' + cmd, body ? JSON.stringify(body) : '{}');
+                if (r.getStatus() !== 200) throw cmd + ' HTTP ' + r.getStatus() + ': ' + resp;
+                return JSON.parse(resp);
+            }
+
+            var token = login();
+
+            var sys = call(token, 'lssystemstats');
+            var system = {};
+            for (var i = 0; i < sys.length; i++) system[sys[i].stat_name] = sys[i].stat_current;
+
+            var nr = call(token, 'lsnodestats');
+            var nmap = {};
+            for (var j = 0; j < nr.length; j++) {
+                var x = nr[j];
+                var nid = '' + x.node_id;
+                if (!nmap[nid]) nmap[nid] = { node_id: nid, node_name: x.node_name, stats: {} };
+                nmap[nid].stats[x.stat_name] = x.stat_current;
+            }
+            var nodes = [];
+            for (var k in nmap) nodes.push(nmap[k]);
+
+            return JSON.stringify({ system: system, nodes: nodes });
+          timeout: 30s
+          parameters:
+            - name: host
+              value: '{HOST.CONN}'
+            - name: port
+              value: '{$API_PORT}'
+            - name: user
+              value: '{$API_USER}'
+            - name: password
+              value: '{$API_PASSWORD}'
+          tags:
+            - tag: component
+              value: system
+            - tag: scope
+              value: performance
+        - uuid: 0bc3aa733cbe4e25aca7c4427a170db9
+          name: 'Data collection: Capacity'
+          type: SCRIPT
+          key: flashsystem.data.capacity
+          delay: '{$IBM.CAP.INTERVAL}'
+          history: 1h
+          trends: '0'
+          value_type: TEXT
+          params: |
+            var p = JSON.parse(value);
+            var base = 'https://' + p.host + ':' + p.port + '/rest';
+
+            function login() {
+                var r = new HttpRequest();
+                r.addHeader('Content-Type: application/json');
+                r.addHeader('X-Auth-Username: ' + p.user);
+                r.addHeader('X-Auth-Password: ' + p.password);
+                var resp = r.post(base + '/auth');
+                if (r.getStatus() !== 200) throw 'auth HTTP ' + r.getStatus() + ': ' + resp;
+                return JSON.parse(resp).token;
+            }
+            function call(token, cmd, body) {
+                var r = new HttpRequest();
+                r.addHeader('Content-Type: application/json');
+                r.addHeader('X-Auth-Token: ' + token);
+                var resp = r.post(base + '/' + cmd, body ? JSON.stringify(body) : '{}');
+                if (r.getStatus() !== 200) throw cmd + ' HTTP ' + r.getStatus() + ': ' + resp;
+                return JSON.parse(resp);
+            }
+            function toBytes(v) {
+                if (v === undefined || v === null || v === '') return 0;
+                var s = ('' + v).trim();
+                var m = s.match(/^([0-9.]+)\s*([KMGTP]?)B?$/i);
+                if (!m) { var n = parseFloat(s); return isNaN(n) ? 0 : n; }
+                var mult = {'':1, K:1024, M:1048576, G:1073741824, T:1099511627776, P:1125899906842624};
+                return parseFloat(m[1]) * (mult[m[2].toUpperCase()] || 1);
+            }
+
+            var token = login();
+
+            var vd = call(token, 'lsvdisk', { bytes: true });
+            var volumes = [];
+            for (var i = 0; i < vd.length; i++) {
+                var v = vd[i], cap = toBytes(v.capacity), used = toBytes(v.used_capacity);
+                volumes.push({ id: '' + v.id, name: v.name, pool: v.mdisk_grp_name || '',
+                    capacity: cap, used: used, pct: cap > 0 ? used / cap * 100 : 0, status: v.status });
+            }
+            var gp = call(token, 'lsmdiskgrp', { bytes: true });
+            var pools = [];
+            for (var g = 0; g < gp.length; g++) {
+                var m = gp[g], pc = toBytes(m.capacity), pf = toBytes(m.free_capacity);
+                pools.push({ id: '' + m.id, name: m.name, capacity: pc, free: pf,
+                    pct: pc > 0 ? (pc - pf) / pc * 100 : 0, status: m.status });
+            }
+            var ev = call(token, 'lseventlog', { filtervalue: 'fixed=no' });
+
+            return JSON.stringify({ volumes: volumes, pools: pools, unfixed_events: ev.length });
+          timeout: 30s
+          parameters:
+            - name: host
+              value: '{HOST.CONN}'
+            - name: port
+              value: '{$API_PORT}'
+            - name: user
+              value: '{$API_USER}'
+            - name: password
+              value: '{$API_PASSWORD}'
+          tags:
+            - tag: component
+              value: system
+            - tag: scope
+              value: capacity
+        - uuid: 8abd14237f134695b64866c68a1f2df3
+          name: 'System: Read IOPS'
+          type: DEPENDENT
+          key: flashsystem.system.read.iops
+          value_type: FLOAT
+          master_item:
+            key: flashsystem.data.performance
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.system.vdisk_r_io'
+            - type: DISCARD_UNCHANGED_HEARTBEAT
+              parameters:
+                - 1h
+          tags:
+            - tag: component
+              value: system
+            - tag: scope
+              value: performance
+        - uuid: 243b0444329c4cc9942eab047939b1ce
+          name: 'System: Write IOPS'
+          type: DEPENDENT
+          key: flashsystem.system.write.iops
+          value_type: FLOAT
+          master_item:
+            key: flashsystem.data.performance
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.system.vdisk_w_io'
+            - type: DISCARD_UNCHANGED_HEARTBEAT
+              parameters:
+                - 1h
+          tags:
+            - tag: component
+              value: system
+            - tag: scope
+              value: performance
+        - uuid: 790f15a13ff24749bd1345762f1c8e93
+          name: 'System: Read throughput'
+          type: DEPENDENT
+          key: flashsystem.system.read.mbps
+          value_type: FLOAT
+          units: MBps
+          master_item:
+            key: flashsystem.data.performance
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.system.vdisk_r_mb'
+            - type: DISCARD_UNCHANGED_HEARTBEAT
+              parameters:
+                - 1h
+          tags:
+            - tag: component
+              value: system
+            - tag: scope
+              value: performance
+        - uuid: 96a027a2267f4d67a3678d33a900f4c3
+          name: 'System: Write throughput'
+          type: DEPENDENT
+          key: flashsystem.system.write.mbps
+          value_type: FLOAT
+          units: MBps
+          master_item:
+            key: flashsystem.data.performance
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.system.vdisk_w_mb'
+            - type: DISCARD_UNCHANGED_HEARTBEAT
+              parameters:
+                - 1h
+          tags:
+            - tag: component
+              value: system
+            - tag: scope
+              value: performance
+        - uuid: c0d6d1100bc84eb59f64f6893f9f9054
+          name: 'System: Read latency'
+          type: DEPENDENT
+          key: flashsystem.system.read.latency
+          value_type: FLOAT
+          units: ms
+          master_item:
+            key: flashsystem.data.performance
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.system.vdisk_r_ms'
+            - type: DISCARD_UNCHANGED_HEARTBEAT
+              parameters:
+                - 1h
+          tags:
+            - tag: component
+              value: system
+            - tag: scope
+              value: performance
+        - uuid: e7febf568c1444f6b89823ab872df58e
+          name: 'System: Write latency'
+          type: DEPENDENT
+          key: flashsystem.system.write.latency
+          value_type: FLOAT
+          units: ms
+          master_item:
+            key: flashsystem.data.performance
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.system.vdisk_w_ms'
+            - type: DISCARD_UNCHANGED_HEARTBEAT
+              parameters:
+                - 1h
+          tags:
+            - tag: component
+              value: system
+            - tag: scope
+              value: performance
+        - uuid: 47863488a46a4aada4dec0a660a39b01
+          name: 'System: CPU utilization'
+          type: DEPENDENT
+          key: flashsystem.system.cpu
+          value_type: FLOAT
+          units: '%'
+          master_item:
+            key: flashsystem.data.performance
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.system.cpu_pc'
+            - type: DISCARD_UNCHANGED_HEARTBEAT
+              parameters:
+                - 1h
+          tags:
+            - tag: component
+              value: system
+            - tag: scope
+              value: performance
+        - uuid: 25d923bbaa1e4add96e409c003df5f26
+          name: 'System: Cache utilization'
+          type: DEPENDENT
+          key: flashsystem.system.cache
+          value_type: FLOAT
+          units: '%'
+          master_item:
+            key: flashsystem.data.performance
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.system.total_cache_pc'
+            - type: DISCARD_UNCHANGED_HEARTBEAT
+              parameters:
+                - 1h
+          tags:
+            - tag: component
+              value: system
+            - tag: scope
+              value: performance
+        - uuid: 1d450977152b4e229a45e01d966c3b48
+          name: 'Health: Unfixed events'
+          type: DEPENDENT
+          key: flashsystem.health.unfixed
+          value_type: UNSIGNED
+          description: 'Number of unfixed entries in the array event log (lseventlog -filtervalue fixed=no). Safety net complementing SNMP traps.'
+          master_item:
+            key: flashsystem.data.capacity
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.unfixed_events'
+          tags:
+            - tag: component
+              value: health
+            - tag: scope
+              value: availability
+        - uuid: 3bbde686c382492a80caa3b71ec7c6a7
+          name: 'Event: Error trap'
+          type: SNMP_TRAP
+          key: 'snmptrap[".1.3.6.1.4.1.2.6.190.1"]'
+          history: 90d
+          value_type: LOG
+          description: 'IBM Spectrum Virtualize error notification (tsveETrap, OID .1.3.6.1.4.1.2.6.190.1).'
+          logtimefmt: ''
+          tags:
+            - tag: component
+              value: event
+            - tag: scope
+              value: availability
+            - tag: severity
+              value: error
+        - uuid: ebc46d9c47ea4d0ca0f15bd9570f88ae
+          name: 'Event: Warning trap'
+          type: SNMP_TRAP
+          key: 'snmptrap[".1.3.6.1.4.1.2.6.190.2"]'
+          history: 90d
+          value_type: LOG
+          description: 'IBM Spectrum Virtualize warning notification (tsveWTrap, OID .1.3.6.1.4.1.2.6.190.2).'
+          tags:
+            - tag: component
+              value: event
+            - tag: scope
+              value: availability
+            - tag: severity
+              value: warning
+        - uuid: 2f1f90afaa1a4301ada4000f0d739338
+          name: 'Event: Informational trap'
+          type: SNMP_TRAP
+          key: 'snmptrap[".1.3.6.1.4.1.2.6.190.3"]'
+          history: 30d
+          value_type: LOG
+          description: 'IBM Spectrum Virtualize informational notification (tsveITrap, OID .1.3.6.1.4.1.2.6.190.3).'
+          tags:
+            - tag: component
+              value: event
+            - tag: scope
+              value: availability
+            - tag: severity
+              value: info
+        - uuid: 356353332e484eb5a2ee6206938e30fb
+          name: 'Availability: ICMP ping'
+          type: SIMPLE
+          key: icmpping
+          delay: 1m
+          history: 7d
+          value_type: UNSIGNED
+          valuemap:
+            name: 'ICMP ping status'
+          tags:
+            - tag: component
+              value: availability
+            - tag: scope
+              value: availability
+      discovery_rules:
+        - uuid: 8f81c3aaf83e43efa509d4b7b6188209
+          name: 'Node discovery'
+          type: DEPENDENT
+          key: flashsystem.node.discovery
+          description: 'Discovers nodes/canisters from the Performance collector.'
+          item_prototypes:
+            - uuid: 567f07ea3a594c9b855d7dc0b2810eff
+              name: 'Node [{#NODE_NAME}]: Read IOPS'
+              type: DEPENDENT
+              key: 'flashsystem.node.read.iops[{#NODE_ID}]'
+              value_type: FLOAT
+              master_item:
+                key: flashsystem.data.performance
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - "$.nodes[?(@.node_id=='{#NODE_ID}')].stats.vdisk_r_io.first()"
+                - type: DISCARD_UNCHANGED_HEARTBEAT
+                  parameters:
+                    - 1h
+              tags:
+                - tag: component
+                  value: node
+                - tag: scope
+                  value: performance
+                - tag: node
+                  value: '{#NODE_NAME}'
+            - uuid: c850c99563ea443781af003124391536
+              name: 'Node [{#NODE_NAME}]: Write IOPS'
+              type: DEPENDENT
+              key: 'flashsystem.node.write.iops[{#NODE_ID}]'
+              value_type: FLOAT
+              master_item:
+                key: flashsystem.data.performance
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - "$.nodes[?(@.node_id=='{#NODE_ID}')].stats.vdisk_w_io.first()"
+                - type: DISCARD_UNCHANGED_HEARTBEAT
+                  parameters:
+                    - 1h
+              tags:
+                - tag: component
+                  value: node
+                - tag: scope
+                  value: performance
+                - tag: node
+                  value: '{#NODE_NAME}'
+            - uuid: 9ff9084e9c4f48078c0508cf1a7c4064
+              name: 'Node [{#NODE_NAME}]: Read throughput'
+              type: DEPENDENT
+              key: 'flashsystem.node.read.mbps[{#NODE_ID}]'
+              value_type: FLOAT
+              units: MBps
+              master_item:
+                key: flashsystem.data.performance
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - "$.nodes[?(@.node_id=='{#NODE_ID}')].stats.vdisk_r_mb.first()"
+                - type: DISCARD_UNCHANGED_HEARTBEAT
+                  parameters:
+                    - 1h
+              tags:
+                - tag: component
+                  value: node
+                - tag: scope
+                  value: performance
+                - tag: node
+                  value: '{#NODE_NAME}'
+            - uuid: 124e7aa2f6584eed834a927333d9f888
+              name: 'Node [{#NODE_NAME}]: Write throughput'
+              type: DEPENDENT
+              key: 'flashsystem.node.write.mbps[{#NODE_ID}]'
+              value_type: FLOAT
+              units: MBps
+              master_item:
+                key: flashsystem.data.performance
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - "$.nodes[?(@.node_id=='{#NODE_ID}')].stats.vdisk_w_mb.first()"
+                - type: DISCARD_UNCHANGED_HEARTBEAT
+                  parameters:
+                    - 1h
+              tags:
+                - tag: component
+                  value: node
+                - tag: scope
+                  value: performance
+                - tag: node
+                  value: '{#NODE_NAME}'
+          master_item:
+            key: flashsystem.data.performance
+          lld_macro_paths:
+            - lld_macro: '{#NODE_ID}'
+              path: '$.node_id'
+            - lld_macro: '{#NODE_NAME}'
+              path: '$.node_name'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.nodes'
+        - uuid: 316fcb7f979649038d803b4411fdb8a3
+          name: 'Volume discovery'
+          type: DEPENDENT
+          key: flashsystem.volume.discovery
+          description: 'Discovers volumes (LUNs) from the Capacity collector.'
+          item_prototypes:
+            - uuid: 8e840c5f4ce641458a96f6c575e6cf82
+              name: 'Volume [{#VOLUME_NAME}]: Space utilization'
+              type: DEPENDENT
+              key: 'flashsystem.volume.pct[{#VOLUME_ID}]'
+              value_type: FLOAT
+              units: '%'
+              master_item:
+                key: flashsystem.data.capacity
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - "$.volumes[?(@.id=='{#VOLUME_ID}')].pct.first()"
+              tags:
+                - tag: component
+                  value: volume
+                - tag: scope
+                  value: capacity
+                - tag: volume
+                  value: '{#VOLUME_NAME}'
+                - tag: pool
+                  value: '{#POOL_NAME}'
+            - uuid: 277ba6bcef0f49c0aec49d05eea619e6
+              name: 'Volume [{#VOLUME_NAME}]: Capacity'
+              type: DEPENDENT
+              key: 'flashsystem.volume.capacity[{#VOLUME_ID}]'
+              value_type: FLOAT
+              units: B
+              master_item:
+                key: flashsystem.data.capacity
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - "$.volumes[?(@.id=='{#VOLUME_ID}')].capacity.first()"
+                - type: DISCARD_UNCHANGED_HEARTBEAT
+                  parameters:
+                    - 1d
+              tags:
+                - tag: component
+                  value: volume
+                - tag: scope
+                  value: capacity
+                - tag: volume
+                  value: '{#VOLUME_NAME}'
+                - tag: pool
+                  value: '{#POOL_NAME}'
+            - uuid: 964ac46831314ac2aab7b2be6829451e
+              name: 'Volume [{#VOLUME_NAME}]: Used space'
+              type: DEPENDENT
+              key: 'flashsystem.volume.used[{#VOLUME_ID}]'
+              value_type: FLOAT
+              units: B
+              master_item:
+                key: flashsystem.data.capacity
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - "$.volumes[?(@.id=='{#VOLUME_ID}')].used.first()"
+              tags:
+                - tag: component
+                  value: volume
+                - tag: scope
+                  value: capacity
+                - tag: volume
+                  value: '{#VOLUME_NAME}'
+                - tag: pool
+                  value: '{#POOL_NAME}'
+          trigger_prototypes:
+            - uuid: 237183fdfe6549779582c1335c3dff79
+              expression: 'last(/IBM FlashSystem by HTTP/flashsystem.volume.pct[{#VOLUME_ID}])>={$VOLUME_PCT_CRIT}'
+              name: 'Volume [{#VOLUME_NAME}]: space utilization is critical (>={$VOLUME_PCT_CRIT}%)'
+              priority: HIGH
+              tags:
+                - tag: component
+                  value: volume
+                - tag: scope
+                  value: capacity
+            - uuid: 96e10a506df745b495a7b22d52f80b1e
+              expression: 'last(/IBM FlashSystem by HTTP/flashsystem.volume.pct[{#VOLUME_ID}])>={$VOLUME_PCT_WARN}'
+              name: 'Volume [{#VOLUME_NAME}]: space utilization is high (>={$VOLUME_PCT_WARN}%)'
+              priority: WARNING
+              dependencies:
+                - name: 'Volume [{#VOLUME_NAME}]: space utilization is critical (>={$VOLUME_PCT_CRIT}%)'
+                  expression: 'last(/IBM FlashSystem by HTTP/flashsystem.volume.pct[{#VOLUME_ID}])>={$VOLUME_PCT_CRIT}'
+              tags:
+                - tag: component
+                  value: volume
+                - tag: scope
+                  value: capacity
+          master_item:
+            key: flashsystem.data.capacity
+          lld_macro_paths:
+            - lld_macro: '{#VOLUME_ID}'
+              path: '$.id'
+            - lld_macro: '{#VOLUME_NAME}'
+              path: '$.name'
+            - lld_macro: '{#POOL_NAME}'
+              path: '$.pool'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.volumes'
+        - uuid: 0dba63cf9249484db1c8d303f316d09a
+          name: 'Pool discovery'
+          type: DEPENDENT
+          key: flashsystem.pool.discovery
+          description: 'Discovers storage pools (MDiskGroups) from the Capacity collector.'
+          item_prototypes:
+            - uuid: 1f32d882efe640889831284d14637f60
+              name: 'Pool [{#POOL_NAME}]: Space utilization'
+              type: DEPENDENT
+              key: 'flashsystem.pool.pct[{#POOL_ID}]'
+              value_type: FLOAT
+              units: '%'
+              master_item:
+                key: flashsystem.data.capacity
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - "$.pools[?(@.id=='{#POOL_ID}')].pct.first()"
+              tags:
+                - tag: component
+                  value: pool
+                - tag: scope
+                  value: capacity
+                - tag: pool
+                  value: '{#POOL_NAME}'
+            - uuid: 98e9c87928b9438da08387e23968f037
+              name: 'Pool [{#POOL_NAME}]: Capacity'
+              type: DEPENDENT
+              key: 'flashsystem.pool.capacity[{#POOL_ID}]'
+              value_type: FLOAT
+              units: B
+              master_item:
+                key: flashsystem.data.capacity
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - "$.pools[?(@.id=='{#POOL_ID}')].capacity.first()"
+                - type: DISCARD_UNCHANGED_HEARTBEAT
+                  parameters:
+                    - 1d
+              tags:
+                - tag: component
+                  value: pool
+                - tag: scope
+                  value: capacity
+                - tag: pool
+                  value: '{#POOL_NAME}'
+            - uuid: 850d05e3c3ba416995d7f738a4a61001
+              name: 'Pool [{#POOL_NAME}]: Free space'
+              type: DEPENDENT
+              key: 'flashsystem.pool.free[{#POOL_ID}]'
+              value_type: FLOAT
+              units: B
+              master_item:
+                key: flashsystem.data.capacity
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - "$.pools[?(@.id=='{#POOL_ID}')].free.first()"
+              tags:
+                - tag: component
+                  value: pool
+                - tag: scope
+                  value: capacity
+                - tag: pool
+                  value: '{#POOL_NAME}'
+            - uuid: f9e024e4a02645808ec0b7cb1afffc6a
+              name: 'Pool [{#POOL_NAME}]: Status'
+              type: DEPENDENT
+              key: 'flashsystem.pool.status[{#POOL_ID}]'
+              value_type: CHAR
+              master_item:
+                key: flashsystem.data.capacity
+              preprocessing:
+                - type: JSONPATH
+                  parameters:
+                    - "$.pools[?(@.id=='{#POOL_ID}')].status.first()"
+                - type: DISCARD_UNCHANGED_HEARTBEAT
+                  parameters:
+                    - 1h
+              tags:
+                - tag: component
+                  value: pool
+                - tag: scope
+                  value: capacity
+                - tag: pool
+                  value: '{#POOL_NAME}'
+          trigger_prototypes:
+            - uuid: 931fcd4c3b2148bda688304ccbaedbba
+              expression: 'last(/IBM FlashSystem by HTTP/flashsystem.pool.pct[{#POOL_ID}])>={$POOL_PCT_CRIT}'
+              name: 'Pool [{#POOL_NAME}]: space utilization is critical (>={$POOL_PCT_CRIT}%)'
+              priority: HIGH
+              tags:
+                - tag: component
+                  value: pool
+                - tag: scope
+                  value: capacity
+            - uuid: b87e867c6a8e41c28af030913d923a92
+              expression: 'last(/IBM FlashSystem by HTTP/flashsystem.pool.pct[{#POOL_ID}])>={$POOL_PCT_WARN}'
+              name: 'Pool [{#POOL_NAME}]: space utilization is high (>={$POOL_PCT_WARN}%)'
+              priority: WARNING
+              dependencies:
+                - name: 'Pool [{#POOL_NAME}]: space utilization is critical (>={$POOL_PCT_CRIT}%)'
+                  expression: 'last(/IBM FlashSystem by HTTP/flashsystem.pool.pct[{#POOL_ID}])>={$POOL_PCT_CRIT}'
+              tags:
+                - tag: component
+                  value: pool
+                - tag: scope
+                  value: capacity
+          master_item:
+            key: flashsystem.data.capacity
+          lld_macro_paths:
+            - lld_macro: '{#POOL_ID}'
+              path: '$.id'
+            - lld_macro: '{#POOL_NAME}'
+              path: '$.name'
+          preprocessing:
+            - type: JSONPATH
+              parameters:
+                - '$.pools'
+      tags:
+        - tag: class
+          value: storage
+        - tag: target
+          value: ibm-flashsystem
+      macros:
+        - macro: '{$API_USER}'
+          description: 'REST API monitoring user.'
+        - macro: '{$API_PASSWORD}'
+          type: SECRET
+          description: 'REST API password.'
+        - macro: '{$API_PORT}'
+          value: '7443'
+          description: 'REST API port.'
+        - macro: '{$IBM.CERT.VERIFY}'
+          value: '0'
+          description: 'SSL certificate verification (self-signed by default). Reserved; the Script HttpRequest object does not verify peer certificates.'
+        - macro: '{$IBM.PERF.INTERVAL}'
+          value: 2m
+          description: 'Performance collector polling interval.'
+        - macro: '{$IBM.CAP.INTERVAL}'
+          value: 10m
+          description: 'Capacity collector polling interval.'
+        - macro: '{$SNMP_COMMUNITY}'
+          value: public
+          description: 'SNMP trap community (host SNMP interface uses this).'
+        - macro: '{$VOLUME_PCT_WARN}'
+          value: '80'
+          description: 'Per-volume space utilization warning threshold (%).'
+        - macro: '{$VOLUME_PCT_CRIT}'
+          value: '90'
+          description: 'Per-volume space utilization critical threshold (%).'
+        - macro: '{$POOL_PCT_WARN}'
+          value: '80'
+          description: 'Per-pool space utilization warning threshold (%).'
+        - macro: '{$POOL_PCT_CRIT}'
+          value: '95'
+          description: 'Per-pool space utilization critical threshold (%).'
+      valuemaps:
+        - uuid: 5c5377a93c894e32a45b85c0a13692e2
+          name: 'ICMP ping status'
+          mappings:
+            - value: '0'
+              newvalue: Down
+            - value: '1'
+              newvalue: Up
+      triggers:
+        - uuid: b0ad72a4abaa41889b36192ed64e6534
+          expression: 'nodata(/IBM FlashSystem by HTTP/flashsystem.data.performance,10m)=1'
+          name: 'FlashSystem: Performance collector is not returning data'
+          priority: WARNING
+          description: 'The REST performance collector has not produced data for 10 minutes. Check API credentials, port 7443 reachability and SSL.'
+          tags:
+            - tag: scope
+              value: availability
+        - uuid: 8f82cb8f88ff4433b3fea1ed02e2ba5c
+          expression: 'nodata(/IBM FlashSystem by HTTP/flashsystem.data.capacity,30m)=1'
+          name: 'FlashSystem: Capacity collector is not returning data'
+          priority: WARNING
+          description: 'The REST capacity collector has not produced data for 30 minutes. Check API credentials, port 7443 reachability and SSL.'
+          tags:
+            - tag: scope
+              value: availability
+        - uuid: 4e05a8cf3abd4df68fdca07e3cbcf6a8
+          expression: 'max(/IBM FlashSystem by HTTP/icmpping,#3)=0'
+          name: 'FlashSystem: Unavailable by ICMP ping'
+          priority: HIGH
+          description: 'Last three ICMP ping checks failed.'
+          tags:
+            - tag: scope
+              value: availability
+        - uuid: 59410d9e10e34fdf82f0e036f71c04fa
+          expression: 'last(/IBM FlashSystem by HTTP/flashsystem.health.unfixed)>0'
+          name: 'FlashSystem: There are unfixed events in the array'
+          priority: WARNING
+          description: 'One or more entries in the array event log are not marked as fixed. Safety net complementing SNMP traps.'
+          tags:
+            - tag: scope
+              value: availability
+        - uuid: d88d7d6508984f96aa36d8c2aca75c44
+          expression: 'length(last(/IBM FlashSystem by HTTP/snmptrap[".1.3.6.1.4.1.2.6.190.1"]))>0'
+          name: 'FlashSystem: Error trap received'
+          priority: HIGH
+          description: 'An IBM Spectrum Virtualize error trap (tsveETrap) was received. See the item value for the trap varbinds (error code, object, node).'
+          manual_close: 'YES'
+          opdata: '{ITEM.LASTVALUE1}'
+          tags:
+            - tag: scope
+              value: availability
+            - tag: severity
+              value: error
+        - uuid: bfcc3e7ce02b4146be997d24c97aa127
+          expression: 'length(last(/IBM FlashSystem by HTTP/snmptrap[".1.3.6.1.4.1.2.6.190.2"]))>0'
+          name: 'FlashSystem: Warning trap received'
+          priority: WARNING
+          description: 'An IBM Spectrum Virtualize warning trap (tsveWTrap) was received. See the item value for the trap varbinds.'
+          manual_close: 'YES'
+          opdata: '{ITEM.LASTVALUE1}'
+          tags:
+            - tag: scope
+              value: availability
+            - tag: severity
+              value: warning
+        - uuid: 9edf8202817742c29bf1eed841a0cad9
+          expression: 'length(last(/IBM FlashSystem by HTTP/snmptrap[".1.3.6.1.4.1.2.6.190.3"]))>0'
+          name: 'FlashSystem: Informational trap received'
+          priority: INFO
+          description: 'An IBM Spectrum Virtualize informational trap (tsveITrap) was received.'
+          manual_close: 'YES'
+          opdata: '{ITEM.LASTVALUE1}'
+          tags:
+            - tag: scope
+              value: availability
+            - tag: severity
+              value: info
