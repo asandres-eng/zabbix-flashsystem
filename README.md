@@ -17,7 +17,7 @@ did not scale.
 Files:
 
 ```
-ibm_flashsystem_template.yaml   # the template (Zabbix 6.4 export format)
+ibm_flashsystem_template.yaml   # the template (Zabbix 7.0 export format; imports on 7.0/7.2/7.4)
 SVC_MIB_9.1.0.MIB               # trap reference / snmptrapd name resolution
 README.md
 docs/design/                    # design + implementation plan
@@ -58,7 +58,7 @@ in the item value and surfaced in the trigger operational data. Trap triggers us
 
 ## Install
 
-1. In Zabbix (**6.4**): *Data collection → Templates → Import* → `ibm_flashsystem_template.yaml`.
+1. In Zabbix (**7.0+**): *Data collection → Templates → Import* → `ibm_flashsystem_template.yaml`.
 2. Create/select the host, link **IBM FlashSystem by HTTP**, add an **SNMP interface** (for
    traps) and an **Agent/DNS/IP** the collectors can reach.
 3. Fill in the macros (below).

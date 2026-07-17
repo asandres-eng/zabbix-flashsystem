@@ -1,5 +1,5 @@
 zabbix_export:
-  version: '6.4'
+  version: '7.0'
   template_groups:
     - uuid: 86ccd7b57a994cfd9a35ea4f35ee4692
       name: Templates/SAN
